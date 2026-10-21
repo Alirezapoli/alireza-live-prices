@@ -1,0 +1,138 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ALIREZA Live Crypto</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #050914;
+  color: white;
+  font-family: Arial, sans-serif;
+}
+.wallpaper {
+  min-height: 100vh;
+  background: url("wallpaper.png") center center / contain no-repeat;
+  position: relative;
+  padding: 18px 12px;
+}
+.panel {
+  width: min(330px, 94%);
+  margin: 0 auto;
+  background: rgba(3, 8, 20, .93);
+  border: 1px solid #16e6ad;
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 0 18px #00e6a355;
+}
+h2 {
+  margin: 0 0 10px;
+  text-align: center;
+  color: #16e6ad;
+  letter-spacing: 2px;
+  font-size: 20px;
+}
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 2px;
+  border-bottom: 1px solid #263349;
+  gap: 8px;
+}
+.row:last-child { border-bottom: 0; }
+.coin { font-weight: bold; }
+.price { text-align: right; font-variant-numeric: tabular-nums; }
+.change { font-size: 12px; margin-top: 4px; }
+.green { color: #21f59b; }
+.red { color: #ff5268; }
+.status {
+  text-align: center;
+  color: #a9b7cb;
+  font-size: 11px;
+  margin-top: 10px;
+}
+</style>
+</head>
+<body>
+<div class="wallpaper">
+  <div class="panel">
+    <h2>ALIREZA LIVE</h2>
+    <div id="prices">Connecting to market...</div>
+    <div class="status" id="status">Connecting to Kraken</div>
+  </div>
+</div>
+<script>
+const coins = [
+  { symbol: "BTC", pair: "XBTUSD" },
+  { symbol: "ETH", pair: "ETHUSD" },
+  { symbol: "SOL", pair: "SOLUSD" },
+  { symbol: "XRP", pair: "XRPUSD" },
+  { symbol: "DOGE", pair: "DOGEUSD" }
+];
+
+const previous = {};
+const prices = document.getElementById("prices");
+const statusBox = document.getElementById("status");
+
+function formatPrice(value) {
+  return Number(value).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: value < 1 ? 6 : 2
+  });
+}
+
+async function updatePrices() {
+  try {
+    const results = await Promise.all(coins.map(async coin => {
+      const url = "https://api.kraken.com/0/public/Ticker?pair=" + coin.pair;
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error("Network error");
+      const data = await response.json();
+      if (data.error && data.error.length) throw new Error(data.error.join(", "));
+      const ticker = Object.values(data.result)[0];
+      if (!ticker) throw new Error("Missing ticker");
+      return {
+        symbol: coin.symbol,
+        price: Number(ticker.c[0]),
+        open: Number(ticker.o)
+      };
+    }));
+
+    prices.innerHTML = results.map(item => {
+      const change = item.open
+        ? ((item.price - item.open) / item.open) * 100
+        : 0;
+      const direction = previous[item.symbol] === undefined
+        ? change >= 0
+        : item.price >= previous[item.symbol];
+      previous[item.symbol] = item.price;
+      const cls = direction ? "green" : "red";
+      const sign = change > 0 ? "+" : "";
+      return `<div class="row">
+        <div class="coin">${item.symbol}/USD</div>
+        <div class="price">
+          <div class="${cls}">${formatPrice(item.price)}</div>
+          <div class="change ${change >= 0 ? "green" : "red"}">
+            ${sign}${change.toFixed(2)}% (24h)
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+
+    statusBox.textContent =
+      "Live prices • Updated " + new Date().toLocaleTimeString();
+  } catch (error) {
+    statusBox.textContent =
+      "Price connection failed. Retrying...";
+  }
+}
+
+updatePrices();
+setInterval(updatePrices, 5000);
+</script>
+</body>
+</html>
