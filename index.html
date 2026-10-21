@@ -4,30 +4,37 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#050914">
 <title>ALIREZA Live Crypto</title>
+
 <style>
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   background: #050914;
   color: white;
   font-family: Arial, sans-serif;
 }
+
 .wallpaper {
   min-height: 100vh;
   background: url("wallpaper.png") center center / contain no-repeat;
-  position: relative;
   padding: 18px 12px;
 }
+
 .panel {
   width: min(330px, 94%);
   margin: 0 auto;
-  background: rgba(3, 8, 20, .93);
+  background: rgba(3, 8, 20, .94);
   border: 1px solid #16e6ad;
   border-radius: 12px;
   padding: 12px;
   box-shadow: 0 0 18px #00e6a355;
 }
+
 h2 {
   margin: 0 0 10px;
   text-align: center;
@@ -35,6 +42,7 @@ h2 {
   letter-spacing: 2px;
   font-size: 20px;
 }
+
 .row {
   display: flex;
   justify-content: space-between;
@@ -43,26 +51,65 @@ h2 {
   border-bottom: 1px solid #263349;
   gap: 8px;
 }
-.row:last-child { border-bottom: 0; }
-.coin { font-weight: bold; }
-.price { text-align: right; font-variant-numeric: tabular-nums; }
-.change { font-size: 12px; margin-top: 4px; }
-.green { color: #21f59b; }
-.red { color: #ff5268; }
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.coin {
+  font-weight: bold;
+}
+
+.price {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.change {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.green {
+  color: #21f59b;
+}
+
+.red {
+  color: #ff5268;
+}
+
 .status {
   text-align: center;
   color: #a9b7cb;
   font-size: 11px;
+  line-height: 1.5;
   margin-top: 10px;
+}
+
+.error-detail {
+  color: #ffb6bf;
+  font-size: 10px;
+  margin-top: 4px;
+  max-width: 190px;
+}
+
+.footer {
+  text-align: center;
+  color: #64748b;
+  font-size: 10px;
+  margin-top: 8px;
 }
 </style>
 </head>
+
 <body>
 <div class="wallpaper">
   <div class="panel">
     <h2>ALIREZA LIVE</h2>
     <div id="prices">Connecting to Exir...</div>
-    <div class="status" id="status">Connecting to Exir market</div>
+    <div class="status" id="status">Connecting to market...</div>
+    <div class="footer">Live market data • Exir API</div>
   </div>
 </div>
 
@@ -75,12 +122,13 @@ const coins = [
   { symbol: "DOGE", pair: "doge-usdt" }
 ];
 
-const prices = document.getElementById("prices");
+const pricesBox = document.getElementById("prices");
 const statusBox = document.getElementById("status");
-const previous = {};
+const previousPrices = {};
 
 function formatPrice(value) {
   const number = Number(value);
+
   return number.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: number < 1 ? 6 : 2
@@ -88,94 +136,171 @@ function formatPrice(value) {
 }
 
 async function getTicker(coin) {
-  const url = "https://api.exir.io/v2/ticker?symbol=" + coin.pair;
-  const response = await fetch(url, { cache: "no-store" });
+  const url =
+    "https://api.exir.io/v2/ticker?symbol=" +
+    encodeURIComponent(coin.pair);
 
-  if (!response.ok) {
-    throw new Error(coin.symbol + " request failed: " + response.status);
+  let response;
+
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      cache: "no-store"
+    });
+  } catch (error) {
+    throw new Error(
+      "Network/CORS: " +
+      (error.message || "Request blocked")
+    );
   }
 
-  const ticker = await response.json();
-  const last = Number(ticker.last);
-  const open = Number(ticker.open);
+  if (!response.ok) {
+    throw new Error("HTTP " + response.status);
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch (error) {
+    throw new Error("Invalid JSON response");
+  }
+
+  const last = Number(data.last);
+  const open = Number(data.open);
 
   if (!Number.isFinite(last) || last <= 0) {
-    throw new Error("Invalid price for " + coin.symbol);
+    throw new Error("Missing or invalid last price");
   }
 
   return {
     symbol: coin.symbol,
     price: last,
-    open: Number.isFinite(open) && open > 0 ? open : null
+    open: Number.isFinite(open) && open > 0
+      ? open
+      : null
   };
 }
 
-async function updatePrices() {
-  statusBox.textContent = "Updating prices...";
+function renderError(coin, message) {
+  const safeMessage = String(message)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .slice(0, 140);
 
-  const results = await Promise.all(
-    coins.map(async coin => {
-      try {
-        return await getTicker(coin);
-      } catch (error) {
-        return { symbol: coin.symbol, error: true };
-      }
-    })
-  );
-
-  prices.innerHTML = results.map(item => {
-    if (item.error) {
-      return `<div class="row">
-        <div class="coin">${item.symbol}/USDT</div>
-        <div class="price red">Unavailable</div>
-      </div>`;
-    }
-
-    const change = item.open === null
-      ? null
-      : ((item.price - item.open) / item.open) * 100;
-
-    const direction = previous[item.symbol] === undefined
-      ? (change === null || change >= 0)
-      : item.price >= previous[item.symbol];
-
-    previous[item.symbol] = item.price;
-
-    const priceClass = direction ? "green" : "red";
-    const changeClass = change === null
-      ? ""
-      : change >= 0 ? "green" : "red";
-    const sign = change !== null && change > 0 ? "+" : "";
-
-    return `<div class="row">
-      <div class="coin">${item.symbol}/USDT</div>
+  return `
+    <div class="row">
+      <div class="coin">${coin.symbol}/USDT</div>
       <div class="price">
-        <div class="${priceClass}">${formatPrice(item.price)}</div>
-        <div class="change ${changeClass}">
-          ${change === null ? "24h change unavailable" :
-            sign + change.toFixed(2) + "% (24h)"}
-        </div>
+        <div class="red">Unavailable</div>
+        <div class="error-detail">${safeMessage}</div>
       </div>
-    </div>`;
-  }).join("");
-
-  const successful = results.filter(item => !item.error).length;
-
-  statusBox.textContent = successful === coins.length
-    ? "Exir Live • Updated " + new Date().toLocaleTimeString()
-    : successful + "/5 markets connected • Retrying...";
+    </div>
+  `;
 }
 
-async function refresh() {
+function renderPrice(item) {
+  const change = item.open === null
+    ? null
+    : ((item.price - item.open) / item.open) * 100;
+
+  let priceDirection = "green";
+
+  if (previousPrices[item.symbol] !== undefined) {
+    priceDirection =
+      item.price >= previousPrices[item.symbol]
+        ? "green"
+        : "red";
+  } else if (change !== null && change < 0) {
+    priceDirection = "red";
+  }
+
+  previousPrices[item.symbol] = item.price;
+
+  const changeClass =
+    change === null ? "" : change >= 0 ? "green" : "red";
+
+  const sign = change !== null && change > 0 ? "+" : "";
+
+  const changeText = change === null
+    ? "24h change unavailable"
+    : sign + change.toFixed(2) + "% (24h)";
+
+  return `
+    <div class="row">
+      <div class="coin">${item.symbol}/USDT</div>
+      <div class="price">
+        <div class="${priceDirection}">
+          ${formatPrice(item.price)}
+        </div>
+        <div class="change ${changeClass}">
+          ${changeText}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+let isUpdating = false;
+
+async function updatePrices() {
+  if (isUpdating) return;
+  isUpdating = true;
+
+  statusBox.textContent = "Checking Exir markets...";
+
   try {
-    await updatePrices();
+    const results = await Promise.all(
+      coins.map(async coin => {
+        try {
+          const ticker = await getTicker(coin);
+
+          return {
+            coin: coin,
+            ticker: ticker,
+            error: null
+          };
+        } catch (error) {
+          return {
+            coin: coin,
+            ticker: null,
+            error: error.message || "Unknown error"
+          };
+        }
+      })
+    );
+
+    pricesBox.innerHTML = results.map(result => {
+      if (result.error) {
+        return renderError(result.coin, result.error);
+      }
+
+      return renderPrice(result.ticker);
+    }).join("");
+
+    const successful = results.filter(
+      result => result.ticker !== null
+    ).length;
+
+    if (successful === coins.length) {
+      statusBox.textContent =
+        "All markets connected • Updated " +
+        new Date().toLocaleTimeString();
+    } else {
+      statusBox.textContent =
+        successful + "/5 markets connected • Retrying";
+    }
   } catch (error) {
-    statusBox.textContent = "Connection failed • Retrying...";
+    statusBox.textContent =
+      "Update failed: " + (error.message || "Unknown error");
+  } finally {
+    isUpdating = false;
   }
 }
 
-refresh();
-setInterval(refresh, 15000);
+updatePrices();
+setInterval(updatePrices, 15000);
 </script>
 </body>
 </html>
