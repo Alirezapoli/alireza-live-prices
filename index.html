@@ -61,78 +61,121 @@ h2 {
 <div class="wallpaper">
   <div class="panel">
     <h2>ALIREZA LIVE</h2>
-    <div id="prices">Connecting to market...</div>
-    <div class="status" id="status">Connecting to Kraken</div>
+    <div id="prices">Connecting to Exir...</div>
+    <div class="status" id="status">Connecting to Exir market</div>
   </div>
 </div>
+
 <script>
 const coins = [
-  { symbol: "BTC", pair: "XBTUSD" },
-  { symbol: "ETH", pair: "ETHUSD" },
-  { symbol: "SOL", pair: "SOLUSD" },
-  { symbol: "XRP", pair: "XRPUSD" },
-  { symbol: "DOGE", pair: "DOGEUSD" }
+  { symbol: "BTC", pair: "btc-usdt" },
+  { symbol: "ETH", pair: "eth-usdt" },
+  { symbol: "SOL", pair: "sol-usdt" },
+  { symbol: "XRP", pair: "xrp-usdt" },
+  { symbol: "DOGE", pair: "doge-usdt" }
 ];
 
-const previous = {};
 const prices = document.getElementById("prices");
 const statusBox = document.getElementById("status");
+const previous = {};
 
 function formatPrice(value) {
-  return Number(value).toLocaleString("en-US", {
+  const number = Number(value);
+  return number.toLocaleString("en-US", {
     minimumFractionDigits: 2,
-    maximumFractionDigits: value < 1 ? 6 : 2
+    maximumFractionDigits: number < 1 ? 6 : 2
   });
 }
 
+async function getTicker(coin) {
+  const url = "https://api.exir.io/v2/ticker?symbol=" + coin.pair;
+  const response = await fetch(url, { cache: "no-store" });
+
+  if (!response.ok) {
+    throw new Error(coin.symbol + " request failed: " + response.status);
+  }
+
+  const ticker = await response.json();
+  const last = Number(ticker.last);
+  const open = Number(ticker.open);
+
+  if (!Number.isFinite(last) || last <= 0) {
+    throw new Error("Invalid price for " + coin.symbol);
+  }
+
+  return {
+    symbol: coin.symbol,
+    price: last,
+    open: Number.isFinite(open) && open > 0 ? open : null
+  };
+}
+
 async function updatePrices() {
-  try {
-    const results = await Promise.all(coins.map(async coin => {
-      const url = "https://api.kraken.com/0/public/Ticker?pair=" + coin.pair;
-      const response = await fetch(url, { cache: "no-store" });
-      if (!response.ok) throw new Error("Network error");
-      const data = await response.json();
-      if (data.error && data.error.length) throw new Error(data.error.join(", "));
-      const ticker = Object.values(data.result)[0];
-      if (!ticker) throw new Error("Missing ticker");
-      return {
-        symbol: coin.symbol,
-        price: Number(ticker.c[0]),
-        open: Number(ticker.o)
-      };
-    }));
+  statusBox.textContent = "Updating prices...";
 
-    prices.innerHTML = results.map(item => {
-      const change = item.open
-        ? ((item.price - item.open) / item.open) * 100
-        : 0;
-      const direction = previous[item.symbol] === undefined
-        ? change >= 0
-        : item.price >= previous[item.symbol];
-      previous[item.symbol] = item.price;
-      const cls = direction ? "green" : "red";
-      const sign = change > 0 ? "+" : "";
+  const results = await Promise.all(
+    coins.map(async coin => {
+      try {
+        return await getTicker(coin);
+      } catch (error) {
+        return { symbol: coin.symbol, error: true };
+      }
+    })
+  );
+
+  prices.innerHTML = results.map(item => {
+    if (item.error) {
       return `<div class="row">
-        <div class="coin">${item.symbol}/USD</div>
-        <div class="price">
-          <div class="${cls}">${formatPrice(item.price)}</div>
-          <div class="change ${change >= 0 ? "green" : "red"}">
-            ${sign}${change.toFixed(2)}% (24h)
-          </div>
-        </div>
+        <div class="coin">${item.symbol}/USDT</div>
+        <div class="price red">Unavailable</div>
       </div>`;
-    }).join("");
+    }
 
-    statusBox.textContent =
-      "Live prices • Updated " + new Date().toLocaleTimeString();
+    const change = item.open === null
+      ? null
+      : ((item.price - item.open) / item.open) * 100;
+
+    const direction = previous[item.symbol] === undefined
+      ? (change === null || change >= 0)
+      : item.price >= previous[item.symbol];
+
+    previous[item.symbol] = item.price;
+
+    const priceClass = direction ? "green" : "red";
+    const changeClass = change === null
+      ? ""
+      : change >= 0 ? "green" : "red";
+    const sign = change !== null && change > 0 ? "+" : "";
+
+    return `<div class="row">
+      <div class="coin">${item.symbol}/USDT</div>
+      <div class="price">
+        <div class="${priceClass}">${formatPrice(item.price)}</div>
+        <div class="change ${changeClass}">
+          ${change === null ? "24h change unavailable" :
+            sign + change.toFixed(2) + "% (24h)"}
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+
+  const successful = results.filter(item => !item.error).length;
+
+  statusBox.textContent = successful === coins.length
+    ? "Exir Live • Updated " + new Date().toLocaleTimeString()
+    : successful + "/5 markets connected • Retrying...";
+}
+
+async function refresh() {
+  try {
+    await updatePrices();
   } catch (error) {
-    statusBox.textContent =
-      "Price connection failed. Retrying...";
+    statusBox.textContent = "Connection failed • Retrying...";
   }
 }
 
-updatePrices();
-setInterval(updatePrices, 5000);
+refresh();
+setInterval(refresh, 15000);
 </script>
 </body>
 </html>
